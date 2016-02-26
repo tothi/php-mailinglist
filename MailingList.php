@@ -20,20 +20,20 @@ interface MailingList
   public function del_subscriber($list, $user);
 
   // get mailing list attributes
-  // public function get_mailinglist_attribs($list);
+  public function get_mailinglist_attribs($list);
 
-  // set mailing list attributes
-  // public function set_mailinglist_attribs($list, $attrib);
+  // update mailing list attributes
+  public function update_mailinglist_attribs($list);
 
   // create mailing list
-  // public function create_mailinglist($list);
+  public function create_mailinglist($list, $listowner);
 
   // delete mailing list
-  // public function delete_mailinglist($list);
+  public function delete_mailinglist($list);
 }
 
 // interface to ezmlm through qmailadmin webapp
-// TODO: implement function exit codes, implement missing functions
+// TODO: implement function exit codes
 class Ezmlm implements MailingList
 {
   // ezmlm admin webapp url
@@ -49,7 +49,25 @@ class Ezmlm implements MailingList
   private $subscribers;
 
   // multidim array of attributes
-  private $attrib;
+  // publicly accessible for ease of use
+  public $attribs;
+
+  // default attribs for new list as in qmailadmin
+  const DEFAULT_ATTRIBS = array('prefix'=>'',
+				'opt1'=>'Mu',
+				'replyto'=>'1',
+				'replyaddr'=>'',
+				'opt6'=>'q',
+				'opt11'=>'H',
+				'opt13'=>'J',
+				'opt14'=>'a',
+				'opt15'=>'b',
+				'sql1'=>'localhost',
+				'sql2'=>'3306',
+				'sql3'=>'',
+				'sql4'=>'',
+				'sql5'=>'',
+				'sql6'=>'ezmlm');
   
   // basic contructor with login
   function __construct($url, $init_auth) {
@@ -57,7 +75,7 @@ class Ezmlm implements MailingList
     $this->auth = array();
     $this->mailinglists = array();
     $this->subscribers = array();
-    $this->attrib = array();
+    $this->attribs = array();
     $this->login($init_auth);
     if (empty($this->auth['time'])) {
       throw new Exception('login failed');
@@ -172,8 +190,8 @@ class Ezmlm implements MailingList
   }
 
   // dump list of subscribers
-  public function dump_subscribers() {
-    return $this->subscribers;
+  public function dump_subscribers($list) {
+    return $this->subscribers[$list];
   }
 
   public function add_subscriber($list, $user) {
@@ -201,6 +219,122 @@ class Ezmlm implements MailingList
     // refreshing list in class instance
     $this->get_subscribers($list);
   }
+
+  public function get_mailinglist_attribs($list) {
+    // get mailinglist attribs by opening modify function
+    $req = new HTTP_Request2($this->url."/com/modmailinglist");
+    $req->setMethod(HTTP_Request2::METHOD_GET);
+    $req->getUrl()->setQueryVariables(array_merge($this->auth,
+						  array('modu'=>$list)));
+    $resp = $req->send();
+
+    // parse response to extract attributes
+    $dom = new DOMDocument();
+    @$dom->loadHTML($resp->getBody());
+
+    foreach ($dom->getElementsByTagName('input') as $t) {
+      switch ($t->getAttribute('name')) {
+      case "opt1":
+	// posting messages:
+	//   MU: anyone
+	//   Mu: only subscribers, others bounce
+	//   mu: only subscribers, others go to moderator for approval
+	//   mUo: only moderators, others bounce
+	//   mUO: only moderators, others go to moderator for approval
+	if ($t->getAttribute('checked')) {
+	  $this->attribs[$list]['opt1'] = $t->getAttribute('value');
+	}
+	break;
+      case "replyto":
+	// replyto default value:
+	//   1: original sender
+	//   2: entire list
+	//   3: address specified in 'replyaddr'
+	if ($t->getAttribute('checked')) {
+	  $this->attribs[$list]['replyto'] = $t->getAttribute('value');
+	}
+	break;
+      case "listowner":
+      case "prefix":
+      case "replyaddr":
+      case "sql1":
+      case "sql2":
+      case "sql3":
+      case "sql4":
+      case "sql5":
+      case "sql6":
+      case "newu":
+	$this->attribs[$list][$t->getAttribute('name')] =
+	  $t->getAttribute('value');
+        break;
+      default:
+	// opt4="t": include trailer at end of messages
+	// opt5="d": set up digest version of the list
+	// opt6="q": service requests sent to listname-request
+	// opt7="r": allow remote admin by moderators
+	// opt8="P": private list
+	// opt9="l": remote admins can view subscribers
+	// opt10="n": remote admins can edit text files
+	// opt11="H": subscription require confirmation by subscriber
+	// opt12="s": subscription require approval of a moderator
+	// opt13="J": unsubscription require confirmation by subscriber
+	// opt14="a": archive list messages
+	// opt16="i": index archive
+	if ($t->getAttribute('checked')) {
+	  $this->attribs[$list][$t->getAttribute('name')] =
+	    $t->getAttribute('value');
+	} else {
+	  $this->attribs[$list][$t->getAttribute('name')] = "";
+	}
+      }
+    }
+
+    foreach ($dom->getElementsByTagName('select')[0]->
+	     getElementsByTagName('option') as $t) {
+      // opt15="BG": archive retrieval is open to anyone
+      // opt15="Bg": limited to subscribers
+      // opt15="b": limited to moderators
+      if ($t->getAttribute('selected')) {
+	$this->attribs[$list]['opt15'] = $t->getAttribute('value');
+      }
+      
+    }
+  }
+
+  public function update_mailinglist_attribs($list) {
+    $req = new HTTP_Request2($this->url."/com/modmailinglistnow");
+    $req->setMethod(HTTP_Request2::METHOD_POST);
+    $req->getUrl()->setQueryVariables($this->auth);
+    $this->attribs[$list]['newu'] = $list;   // for safety
+    $req->addPostParameter($this->attribs[$list]);
+    $resp = $req->send();
+  }
+
+  public function create_mailinglist($list, $listowner) {
+    $req = new HTTP_Request2($this->url."/com/addmailinglistnow");
+    $req->setMethod(HTTP_Request2::METHOD_POST);
+    $req->getUrl()->setQueryVariables($this->auth);
+    $this->attribs[$list] = $this::DEFAULT_ATTRIBS;
+    $this->attribs[$list]['newu'] = $list;
+    $this->attribs[$list]['listowner'] = $listowner;
+    $req->addPostParameter($this->attribs[$list]);
+    $resp = $req->send();
+
+    // refresh lists in class
+    $this->get_mailinglists();
+  }
+
+  public function delete_mailinglist($list) {
+    $req = new HTTP_Request2($this->url."/com/delmailinglistnow");
+    $req->setMethod(HTTP_Request2::METHOD_POST);
+    $req->getUrl()->setQueryVariables($this->auth);
+    $req->addPostParameter(array('modu'=>$list));
+    $resp = $req->send();
+    
+    // refresh lists in class
+    $this->get_mailinglists();
+  }
+  
 }
 
 ?>
