@@ -34,6 +34,9 @@ interface MailingList
 
 // interface to ezmlm through qmailadmin webapp
 // TODO: implement function exit codes
+//       secure class parameters / input objects
+// WARNING: no parameter / input validation implemented,
+//          the class trusts anything
 class Ezmlm implements MailingList
 {
   // ezmlm admin webapp url
