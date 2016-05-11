@@ -19,6 +19,15 @@ interface MailingList
   // delete subscriber $user from mailing list $list
   public function del_subscriber($list, $user);
 
+  // get list of moderators on mailing list $list
+  public function get_moderators($list);
+
+  // add moderator $user to mailing list $list
+  public function add_moderator($list, $user);
+
+  // delete moderator $user from mailing list $list
+  public function del_moderator($list, $user);
+  
   // get mailing list attributes
   public function get_mailinglist_attribs($list);
 
@@ -51,6 +60,9 @@ class Ezmlm implements MailingList
   // multidim array of subscribers
   private $subscribers;
 
+  // multidim array of moderators
+  private $moderators;
+
   // multidim array of attributes
   // publicly accessible for ease of use
   public $attribs;
@@ -78,6 +90,7 @@ class Ezmlm implements MailingList
     $this->auth = array();
     $this->mailinglists = array();
     $this->subscribers = array();
+    $this->moderators = array();
     $this->attribs = array();
     $this->login($init_auth);
     if (empty($this->auth['time'])) {
@@ -173,6 +186,34 @@ class Ezmlm implements MailingList
     }
   }
 
+  // read moderators
+  public function get_moderators($list) {
+    // get moderators of given list
+    $req = new HTTP_Request2($this->url."/com/showlistmod");
+    $req->setMethod(HTTP_Request2::METHOD_GET);
+    $req->getUrl()->setQueryVariables(array_merge($this->auth,
+						  array('modu'=>$list)));
+    $resp = $req->send();
+
+    // parse response to extract subscribers
+    $dom = new DOMDocument();
+    @$dom->loadHTML($resp->getBody());
+
+    $tds = $dom->getElementsByTagName('table')[0]
+      ->getElementsByTagName('table')[0]
+      ->getElementsByTagName('table')[0]
+      ->getElementsByTagName('table')[0]
+      ->getElementsByTagName('table')[0]
+      ->getElementsByTagName('td');
+
+    $this->moderators[$list] = array();
+    foreach ($tds as $td) {
+      if ($td->getAttribute('align') == 'left') {
+	$this->moderators[$list][] = $td->textContent;
+      }
+    }
+  }
+
   // get whole subscriber database (a LOTS OF queries, might take MUCH long)
   public function get_subscribers_db() {
     // delete subscriber db
@@ -187,6 +228,21 @@ class Ezmlm implements MailingList
     }
   }
 
+  // get whole moderator database (a LOTS OF queries, might take MUCH long)
+  public function get_moderators_db() {
+    // delete moderator db
+    $this->moderators = array();
+
+    // get mailing lists
+    $this->get_mailinglists();
+
+    // get subscribers for each of the mailing lists
+    foreach($this->mailinglists as $ml) {
+      $this->get_moderators($ml);
+    }
+  }
+  
+  
   // dump array of mailinglists
   public function dump_mailinglists() {
     return $this->mailinglists;
@@ -195,6 +251,11 @@ class Ezmlm implements MailingList
   // dump list of subscribers
   public function dump_subscribers($list) {
     return $this->subscribers[$list];
+  }
+
+  // dump list of moderators
+  public function dump_moderators($list) {
+    return $this->moderators[$list];
   }
 
   public function add_subscriber($list, $user) {
@@ -210,6 +271,18 @@ class Ezmlm implements MailingList
     $this->get_subscribers($list);
   }
 
+  public function add_moderator($list, $user) {
+    // add moderator with a simple POST query
+    $req = new HTTP_Request2($this->url."/com/addlistmodnow");
+    $req->setMethod(HTTP_Request2::METHOD_POST);
+    $req->getUrl()->setQueryVariables($this->auth);
+    $req->addPostParameter(array('modu'=>$list, 'newu'=>$user));
+    $resp = $req->send();
+
+    // refreshing list in class instance
+    $this->get_moderators($list);
+  }
+  
   public function del_subscriber($list, $user) {
     // delete subscriber with a simple POST query
     // WARNING: ezmlm sends an alert email to the deleted user
@@ -223,6 +296,18 @@ class Ezmlm implements MailingList
     $this->get_subscribers($list);
   }
 
+  public function del_moderator($list, $user) {
+    // delete moderator with a simple POST query
+    $req = new HTTP_Request2($this->url."/com/dellistmodnow");
+    $req->setMethod(HTTP_Request2::METHOD_POST);
+    $req->getUrl()->setQueryVariables($this->auth);
+    $req->addPostParameter(array('modu'=>$list, 'newu'=>$user));
+    $resp = $req->send();
+
+    // refreshing list in class instance
+    $this->get_moderators($list);
+  }
+  
   public function get_mailinglist_attribs($list) {
     // get mailinglist attribs by opening modify function
     $req = new HTTP_Request2($this->url."/com/modmailinglist");
