@@ -18,4 +18,4 @@ current status is beta testing.
  * delete mailing list
 
 * Known issues:
- * 'prefix' option not working (as in qmailadmin)
+ * 'prefix' option is not working (as in qmailadmin)
